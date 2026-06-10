@@ -1,0 +1,399 @@
+package main;
+import org.ejml.simple.SimpleMatrix;
+import org.ejml.simple.SimpleSVD;
+import java.util.ArrayList;
+import java.util.List;
+
+public class ClasscHandEyeCalibration {
+
+    public static void main(String[] args) {
+
+        // ==========================================
+        // 【第一步】工具（TCP）参数
+        // ==========================================
+        double tool_x = 0;
+        double tool_y = 0;
+        double tool_z = 0;
+        double tool_rx = 0.0;
+        double tool_ry = 0.0;
+        double tool_rz = 0.0;
+
+        // ==========================================
+        // 【新增步骤】填入“相机相对于法兰”的大致关系 (初始猜测)
+        // ==========================================
+        // 请拿尺子量一下，或者看CAD图纸，填入大概的值。
+        // 只要误差在 20-30mm 或 20-30度以内，算法通常都能收敛。
+        // 这是 Camera Frame 在 Flange Frame 下的坐标
+        double guess_cam_x = -10;   // mm (相机原点在法兰坐标系X方向大概多少)
+        double guess_cam_y = -100.0;  // mm
+        double guess_cam_z = 120.0;  // mm
+        // 旋转关系 (欧拉角 XYZ 顺序)
+        // 例如：如果相机Z轴和法兰Z轴平行，填0,0,0
+        // 如果相机是倒着装的，可能需要填 180, 0, 0 之类
+        double guess_cam_rx = 0.0;   // degree
+        double guess_cam_ry = 0.0;
+        double guess_cam_rz = 0.0;
+
+        // ==========================================
+        // 【第二步】填入机器人位姿 (保持不变)
+        // ==========================================
+        double[][] robot_tcp_poses = {
+           {-463.549,-368.533,592.625,-172.435,-0.453,130.258},
+              //  {-337.952,-724.732,603.773,174.605,-20.867,156.649},
+                {-794.554,-108.028,604.512,170.476,17.859,89.059},
+                {-729.025,-589.634,648.476,166.225,-6.239,128.829},
+              //{-273.841,-844.008,628.118,-156.845,-11.399,68.398},
+                {-902.055,-54.337,628.995,160.416,14.16,75.248},
+                {-749.969,-554.057,640.762,167.092,-1.121,134.312},
+                {-920.345,-213.464,674.327,165.549,12.807,105.599},
+                {-755.939,-576.086,682.547,167.406,-1.732,135.109},
+               {-748.284,-600.969,731.484,171.494,0.953,135.712},//7号注释
+                {-678.687,-340.483,639.406,-178.895,-1.942,128.087},
+                {-945.267,-546.757,648.650,160.958,5.527,123.838}
+               /*{-494.913,-373.617,701.616,-170.679,1.118,129.093},//新测
+                {-597.118,-28.694,695.377,-177.465,23.069,93.575},
+                {-276.617,-575.459,702.209,-178.309,-20.793,159.589},
+                {-256.664,-135.557,708.299,-155.435,4.297,124.596},
+                {-409.269,-97.929,723.514,-167.204,13.955,91.743},
+                {-823.818,-510.837,688.805,165.124,3.109,124.584},
+                {-227.924,-932.828,734.782,173.729,-26.369,143.798},*/
+               //{-970.346,-49.217,749.619,159.659,19.648,77.015},
+               /* {-259.283,-747.829,727.642,-174.905,-1.528,129.255},
+                {-618.646,-493.994,741.475,173.859,16.789,115.577},
+                {57.866,-784.929,708.665,176.915,-21.934,179.287},
+                {-470.361,-947.858,686.032,165.612,-9.082,128.003},
+                {-232.839,-182.624,725.145,-155.114,-3.907,168.165},
+                {-467.067,-926.139,729.351,171.429,1.509,-176.016},
+                {138.159,-949.948,724.537,162.577,-26.108,-164.417},
+                {-820.219,-219.127,740.451,163.045,24.965,98.286},*/
+
+
+
+
+
+
+
+
+
+                //{-596.495,7.446,698.368,165.336,4.14,-71.579}
+                /*{127.439,334.659, 622.689, -169.123,6.839, -9.557},
+                {37.036,284.789,696.332, -167.653,-4.288, 10.337},
+                {-28.652,228.439,696.487,-171.415,-13.202,34.595},
+                {201.979,92.072,674.377,-161.584,14.779,-12.735},
+                {-64.939,360.559,611.057,-172.223,9.307,-53.569},
+                {48.028,370.578,598.902,-173.587,4.954,-17.505},
+                {157.734,158.078,506.119,-161.075,-0.889,20.272},
+                {19.382,238.358,635.499,-163.558,3.166,-11.157},
+                {108.234,208.293,632.56,-165.779,7.696,-14.619},
+                {-21.908,208.297,632.559,-164.176,1.529,-14.491},
+                {108.234,238.293,632.56,-165.779,7.696,-14.609},
+                {108.588,148.305,632.56,-165.688,7.338,-14.609},
+                {108.588,208.394,652.55,-165.688,7.338,-14.609},
+                {108.588,208.394,612.566,-165.688,7.338,-14.609}*/
+        };
+
+        // ==========================================
+        // 【第三步】填入相机坐标 (保持不变)
+        // ==========================================
+        double[][] pc_raw = {
+            {136.943024,-26.557713,883.248047},
+              //  {120.955490,83.415054,966.193298},
+                {14.356287,10.345580,902.867432},
+                {31.446592,-59.507240,887.081482},
+               // {-21.954388,-18.893543,1030.585327},
+                {-49.163803,10.853357,947.316040},
+                {78.443298,-38.943821,880.874329},
+                {-6.685440,-40.373547,945.330200},
+                {72.382080,-21.991634,925.970947},
+               {140.860886,60.095287,984.061096},
+                {-51.540817,21.193657,879.638123},
+               {93.382027,-4.891959,906.429688}
+              /*{125.346596,44.733891,984.690857},//新测
+                {60.573338,6.558859,1028.991333},
+                {63.967369,78.399467,1055.326050},
+                {87.753021,28.176659,1113.391968},
+                {-56.469215,39.266815,1069.089233},
+                {73.600273,-62.266434,925.686523},
+                {115.646713,29.773811,1176.642456},*/
+               // {74.993675,7.893673,1085.031616}
+                /*{65.385139,14.079839,992.358215},
+                {12.872378,3.186834,1038.291626},
+                {60.055618,17.332623,1063.809082},
+                {-41.893818,-40.457457,916.920776},
+                {2.542608,7.666823,1148.339355},
+                {8.482883,83.166153,973.725220},
+                {-18.925665,26.816082,1112.261597},
+                {-72.416779,34.224575,1159.550781}*/
+
+
+
+
+
+
+
+
+
+               /*{32.202488, 34.225426, 872.304932},
+                {26.631124, 26.550844,953.929749},
+                {64.787506,19.315628,979.109314},
+                {31.495975,-11.004339,1011.286621},
+                {52.636782,-12.445569,859.275574},
+                {50.703625,-20.627272,835.521606},
+                {87.398399,-46.243660,827.320740},
+                {46.371479,28.767603,915.218994},
+                {11.394318,-14.348095,919.237366},
+                {30.269129,-18.844639,919.889343},
+                {10.84229,13.267319,906.907104},
+                {-14.373700,-67.132675,930.973633},
+                {1.846080,-7.3928251,934.913269},
+                {1.157184,-17.3928251,869.783264}*/
+
+        };
+
+        // 1. 构建工具矩阵并移除偏移
+        System.out.println("=== 正在移除工具偏移 (还原法兰位姿) ===");
+        SimpleMatrix T_tool = poseToMatrix(tool_x, tool_y, tool_z, tool_rx, tool_ry, tool_rz);
+        SimpleMatrix T_tool_inv = T_tool.invert();
+
+        List<SimpleMatrix> flangePoses = new ArrayList<>();
+        for (double[] p : robot_tcp_poses) {
+            SimpleMatrix T_tcp = poseToMatrix(p[0], p[1], p[2], p[3], p[4], p[5]);
+            SimpleMatrix T_flange = T_tcp.mult(T_tool_inv);
+            flangePoses.add(T_flange);
+        }
+
+        // 2. 构建初始猜测矩阵
+        SimpleMatrix initialGuess = poseToMatrix(guess_cam_x, guess_cam_y, guess_cam_z, guess_cam_rx, guess_cam_ry, guess_cam_rz);
+
+        // 3. 启动引导式标定
+        System.out.println("=== 启动基于初始猜测的自动标定 ===");
+        runGuidedCalibration(pc_raw, flangePoses, initialGuess);
+
+    }
+
+    // 法奥/通用 ZYX 欧拉角转矩阵 (保持不变)
+    private static SimpleMatrix poseToMatrix(double x, double y, double z, double rx_deg, double ry_deg, double rz_deg) {
+        double rx = Math.toRadians(rx_deg);
+        double ry = Math.toRadians(ry_deg);
+        double rz = Math.toRadians(rz_deg);
+        double cx = Math.cos(rx), sx = Math.sin(rx);
+        double cy = Math.cos(ry), sy = Math.sin(ry);
+        double cz = Math.cos(rz), sz = Math.sin(rz);
+        // 注意：这里假设是标准的旋转矩阵构造，Rx*Ry*Rz 或 Rz*Ry*Rx，具体取决于你的机器人控制器定义
+        // 此处沿用你原代码的逻辑
+        SimpleMatrix Rx = new SimpleMatrix(3, 3, true, new double[]{1, 0, 0, 0, cx, -sx, 0, sx, cx});
+        SimpleMatrix Ry = new SimpleMatrix(3, 3, true, new double[]{cy, 0, sy, 0, 1, 0, -sy, 0, cy});
+        SimpleMatrix Rz = new SimpleMatrix(3, 3, true, new double[]{cz, -sz, 0, sz, cz, 0, 0, 0, 1});
+        SimpleMatrix R = Rz.mult(Ry).mult(Rx); // 这里的顺序非常重要，通常是 ZYX 或 XYZ
+        SimpleMatrix T = SimpleMatrix.identity(4);
+        T.insertIntoThis(0, 0, R);
+        T.set(0, 3, x);
+        T.set(1, 3, y);
+        T.set(2, 3, z);
+        return T;
+    }
+
+    // 【修改】不再盲目搜索，而是使用 Initial Guess
+    private static void runGuidedCalibration(double[][] pc_raw, List<SimpleMatrix> flangePoses, SimpleMatrix initialGuess) {
+        // 将原始点转为矩阵列表
+        List<SimpleMatrix> camPoints = new ArrayList<>();
+        for (double[] p : pc_raw) {
+            // 直接使用原始数据，因为初始猜测矩阵会处理旋转关系
+            camPoints.add(new SimpleMatrix(3, 1, true, new double[]{p[0], p[1], p[2]}));
+        }
+
+        // 运行带初值的迭代标定
+        CalibrationResult res = runIterativeCalibration(camPoints, flangePoses, initialGuess);
+
+        System.out.println("\n=== 最终结果 ===");
+        System.out.printf("残差误差: %.3f mm\n", res.error);
+
+        SimpleMatrix cameraToFlange = SimpleMatrix.identity(4);
+        cameraToFlange.insertIntoThis(0, 0, res.R);
+        cameraToFlange.set(0, 3, res.t.get(0));
+        cameraToFlange.set(1, 3, res.t.get(1));
+        cameraToFlange.set(2, 3, res.t.get(2));
+
+        System.out.println("\n=== 相机 -> 法兰 变换矩阵 (Camera in Flange Frame) ===");
+        System.out.println(cameraToFlange);
+
+        // 解析结果以便阅读
+        double x = res.t.get(0);
+        double y = res.t.get(1);
+        double z = res.t.get(2);
+        System.out.printf("平移 (XYZ): %.2f, %.2f, %.2f\n", x, y, z);
+        // 这里省略了旋转矩阵转欧拉角的代码，直接看矩阵即可
+
+        if (res.error < 10.0) {
+            System.out.println(">>> 标定成功。");
+        } else {
+            System.out.println(">>> 误差较大。可能原因：1.初始猜测偏差太大 2.数据点太少(建议至少6-9组) 3.数据采集时旋转幅度不够大");
+        }
+    }
+
+    static class CalibrationResult {
+        SimpleMatrix R, t;
+        double error;
+
+        CalibrationResult(SimpleMatrix R, SimpleMatrix t, double error) {
+            this.R = R;
+            this.t = t;
+            this.error = error;
+        }
+    }
+
+    // 迭代核心算法
+    private static CalibrationResult runIterativeCalibration(List<SimpleMatrix> camPoints, List<SimpleMatrix> flangePoses, SimpleMatrix initialGuess) {
+        // 检查数据量
+        if (flangePoses.size() < 10) {
+            System.err.println("警告: 数据点过少 (" + flangePoses.size() + "组)。建议至少提供10-15组包含不同旋转姿态的数据，否则结果不可靠！");
+        }
+
+        // 1. 从初始猜测中提取 R 和 t
+        SimpleMatrix R_est = initialGuess.extractMatrix(0, 3, 0, 3);
+        SimpleMatrix t_est = initialGuess.extractMatrix(0, 3, 3, 4);
+
+        // ==========================================================================
+        // 【修复点 1】正确初始化 Target
+        // 不能假设目标点在法兰原点，必须用 InitialGuess + 第一组相机数据推算世界坐标系下的目标点
+        // 公式：P_world = T_flange_0 * T_guess * P_cam_0
+        // ==========================================================================
+        SimpleMatrix p_cam_0 = camPoints.get(0); // 3x1
+        // 将 P_cam_0 转为 4x1
+        SimpleMatrix p_cam_0_homo = new SimpleMatrix(4, 1);
+        p_cam_0_homo.set(0, 0, p_cam_0.get(0));
+        p_cam_0_homo.set(1, 0, p_cam_0.get(1));
+        p_cam_0_homo.set(2, 0, p_cam_0.get(2));
+        p_cam_0_homo.set(3, 0, 1.0);
+
+        // 计算 P_flange_0 (使用初始猜测矩阵)
+        SimpleMatrix p_flange_0 = initialGuess.mult(p_cam_0_homo); // 4x1
+
+        // 计算 P_base (使用第一组机器人的法兰位姿)
+        SimpleMatrix currentTarget = flangePoses.get(0).mult(p_flange_0); // 4x1
+
+        // 只要前3维作为初始中心点
+        currentTarget = currentTarget.extractMatrix(0, 4, 0, 1);
+
+        System.out.println("初始推算的固定点世界坐标 (Initial World Point Guess):");
+        System.out.printf("X: %.2f, Y: %.2f, Z: %.2f\n", currentTarget.get(0), currentTarget.get(1), currentTarget.get(2));
+        // ==========================================================================
+
+        double lastErr = Double.MAX_VALUE;
+
+        // 迭代优化
+        for (int iter = 0; iter < 100; iter++) {
+            List<SimpleMatrix> targetsInFlangeFrame = new ArrayList<>();
+
+            // 步骤 A: 假设 currentTarget 是真实的世界固定点，将其转换回每一组的法兰坐标系下
+            // P_flange_expected = inv(T_base_to_flange) * P_world_fixed
+            for (SimpleMatrix T_base_to_flange : flangePoses) {
+                SimpleMatrix T_flange_to_base = T_base_to_flange.invert(); // 求逆较慢，生产环境可优化
+                SimpleMatrix p_target_in_flange = T_flange_to_base.mult(currentTarget);
+                targetsInFlangeFrame.add(p_target_in_flange.extractMatrix(0, 3, 0, 1));
+            }
+
+            // 步骤 B: 使用 Kabsch 算法计算 {Camera Points} -> {Flange Targets} 的最佳变换
+            // 这会给出一个新的 T_cam_to_flange (即 R_est, t_est)
+            SimpleMatrix[] pose = kabsch(camPoints, targetsInFlangeFrame);
+            R_est = pose[0];
+            t_est = pose[1];
+
+            // 步骤 C: 使用新的 R_est, t_est 重新推算所有的世界坐标点，并求平均中心作为新的 currentTarget
+            SimpleMatrix newCenter = new SimpleMatrix(4, 1);
+            double totalDist = 0;
+
+            // 构建当前的 T_cam_to_flange 4x4 矩阵
+            SimpleMatrix T_new = SimpleMatrix.identity(4);
+            T_new.insertIntoThis(0, 0, R_est);
+            T_new.set(0, 3, t_est.get(0));
+            T_new.set(1, 3, t_est.get(1));
+            T_new.set(2, 3, t_est.get(2));
+
+            for (int i = 0; i < camPoints.size(); i++) {
+                // P_cam -> P_flange
+                SimpleMatrix p_c = camPoints.get(i);
+                SimpleMatrix p_c_4 = new SimpleMatrix(4, 1, true, new double[]{p_c.get(0), p_c.get(1), p_c.get(2), 1.0});
+                SimpleMatrix p_f = T_new.mult(p_c_4);
+
+                // P_flange -> P_base
+                SimpleMatrix p_b = flangePoses.get(i).mult(p_f);
+
+                newCenter = newCenter.plus(p_b);
+
+                // 累加残差 (点到中心的距离)
+                double dist = Math.sqrt(Math.pow(p_b.get(0) - currentTarget.get(0), 2) +
+                        Math.pow(p_b.get(1) - currentTarget.get(1), 2) +
+                        Math.pow(p_b.get(2) - currentTarget.get(2), 2));
+                totalDist += dist;
+            }
+
+            // 更新中心点
+            newCenter = newCenter.divide(camPoints.size());
+            // 保持齐次坐标最后一位是1
+            newCenter.set(3, 1.0);
+
+            double avgErr = totalDist / camPoints.size();
+
+            // 打印收敛过程
+            if (iter % 10 == 0 || iter == 0) {
+                // System.out.printf("Iter %d, Mean Error: %.4f mm\n", iter, avgErr);
+            }
+
+            if (Math.abs(lastErr - avgErr) < 0.00001) break; // 收敛阈值
+            lastErr = avgErr;
+            currentTarget = newCenter;
+        }
+        // ================= 排查毒瘤数据 =================
+        System.out.println("\n=== 各组数据残差排查 (揪出毒瘤) ===");
+
+        // 用最终算出的旋转和平移重构变换矩阵
+        SimpleMatrix final_T = SimpleMatrix.identity(4);
+        final_T.insertIntoThis(0, 0, R_est);
+        final_T.set(0, 3, t_est.get(0));
+        final_T.set(1, 3, t_est.get(1));
+        final_T.set(2, 3, t_est.get(2));
+
+        for (int i = 0; i < camPoints.size(); i++) {
+            SimpleMatrix p_c = camPoints.get(i);
+            SimpleMatrix p_c_4 = new SimpleMatrix(4, 1, true, new double[]{p_c.get(0), p_c.get(1), p_c.get(2), 1.0});
+            // 这里使用 final_T
+            SimpleMatrix p_f = final_T.mult(p_c_4);
+            SimpleMatrix p_b = flangePoses.get(i).mult(p_f);
+
+            // 计算这个点到最终中心的偏差距离
+            double dist = Math.sqrt(Math.pow(p_b.get(0) - currentTarget.get(0), 2) +
+                    Math.pow(p_b.get(1) - currentTarget.get(1), 2) +
+                    Math.pow(p_b.get(2) - currentTarget.get(2), 2));
+            System.out.printf("第 %d 组数据: 自身误差 = %5.2f mm\n", i, dist);
+        }
+        // ===============================================
+
+        return new CalibrationResult(R_est, t_est, lastErr);
+    }
+
+
+    private static SimpleMatrix[] kabsch(List<SimpleMatrix> src, List<SimpleMatrix> tgt) {
+        int n = src.size();
+        SimpleMatrix cS = new SimpleMatrix(3, 1), cT = new SimpleMatrix(3, 1);
+        for (int i = 0; i < n; i++) {
+            cS = cS.plus(src.get(i));
+            cT = cT.plus(tgt.get(i));
+        }
+        cS = cS.divide(n);
+        cT = cT.divide(n);
+        SimpleMatrix H = new SimpleMatrix(3, 3);
+        for (int i = 0; i < n; i++)
+            H = H.plus(src.get(i).minus(cS).mult(tgt.get(i).minus(cT).transpose()));
+        SimpleSVD<SimpleMatrix> svd = H.svd();
+        SimpleMatrix R = svd.getV().mult(svd.getU().transpose());
+        if (R.determinant() < 0) {
+            SimpleMatrix V = svd.getV().copy();
+            V.set(0, 2, -V.get(0, 2));
+            V.set(1, 2, -V.get(1, 2));
+            V.set(2, 2, -V.get(2, 2));
+            R = V.mult(svd.getU().transpose());
+        }
+        return new SimpleMatrix[]{R, cT.minus(R.mult(cS))};
+    }
+}
